@@ -19,6 +19,7 @@
 #include <tinystl/allocator.h>
 #include <tinystl/string.h>
 #include <tinystl/vector.h>
+#include <vector>
 
 #include <windows.h>
 #include <windowsx.h>
@@ -33,18 +34,11 @@
 #	define XINPUT_DLL_A "xinput.dll"
 #endif // XINPUT_DLL_A
 
+#include "Encoding.hpp"
+#include "VsyncWaiter.hpp"
+
 namespace entry
 {
-	typedef tinystl::vector<WCHAR> WSTRING;
-
-	inline WSTRING UTF8ToUTF16(const char *utf8_str)
-	{
-		int len = MultiByteToWideChar(CP_UTF8, 0, utf8_str, -1, NULL, 0);
-		WSTRING utf16(len);
-		MultiByteToWideChar(CP_UTF8, 0, utf8_str, -1, utf16.data(), len);
-		return utf16;
-	}
-
 	typedef DWORD (WINAPI* PFN_XINPUT_GET_STATE)(DWORD dwUserIndex, XINPUT_STATE* pState);
 	typedef void  (WINAPI* PFN_XINPUT_ENABLE)(BOOL enable); // 1.4+
 
@@ -454,7 +448,7 @@ namespace entry
 
 		int32_t run(int _argc, const char* const* _argv)
 		{
-			SetDllDirectoryA(".");
+			SetDllDirectoryW(L".");
 
 			s_xinput.init();
 
@@ -473,10 +467,10 @@ namespace entry
 			RegisterClassExW(&wnd);
 
 			m_windowAlloc.alloc();
-			m_hwnd[0] = CreateWindowExA(
+			m_hwnd[0] = CreateWindowExW(
 				  WS_EX_ACCEPTFILES
-				, "bgfx"
-				, "BGFX"
+				, L"bgfx"
+				, L"BGFX"
 				, WS_OVERLAPPEDWINDOW|WS_VISIBLE
 				, 0
 				, 0
@@ -489,7 +483,7 @@ namespace entry
 				);
 
 			m_flags[0] = 0
-				| ENTRY_WINDOW_FLAG_ASPECT_RATIO
+				//| ENTRY_WINDOW_FLAG_ASPECT_RATIO
 				| ENTRY_WINDOW_FLAG_FRAME
 				;
 
@@ -505,6 +499,8 @@ namespace entry
 			mte.m_argc = _argc;
 			mte.m_argv = _argv;
 
+			m_vsyncWaiter.Open();
+
 			bgfx::renderFrame();
 
 			bx::Thread thread;
@@ -516,14 +512,25 @@ namespace entry
 			MSG msg;
 			msg.message = WM_NULL;
 
+			uint8_t waitVsync = 0;
 			while (!m_exit)
 			{
 				bgfx::renderFrame();
+				//bgfx::renderFrame();
+
+				// Selective Vertical Synchronization
+				if (waitVsync >= 3)
+				{
+					m_vsyncWaiter.WaitVsync();
+					waitVsync = 0;
+				}
+				else
+					++waitVsync;
 
 				s_xinput.update(m_eventQueue);
-				WaitForInputIdle(GetCurrentProcess(), 16);
+				//WaitForInputIdle(GetCurrentProcess(), 16);
 
-				while (0 != PeekMessageW(&msg, NULL, 0U, 0U, PM_REMOVE) )
+				while (0 != PeekMessageW(&msg, NULL, 0U, 0U, PM_REMOVE))
 				{
 					TranslateMessage(&msg);
 					DispatchMessageW(&msg);
@@ -551,7 +558,7 @@ namespace entry
 					{
 						Msg* msg = (Msg*)_lparam;
 						HWND hwnd = CreateWindowW(L"bgfx"
-							, UTF8ToUTF16(msg->m_title.c_str()).data()
+							, utf8to16w(msg->m_title.c_str()).data()
 							, WS_OVERLAPPEDWINDOW|WS_VISIBLE
 							, msg->m_x
 							, msg->m_y
@@ -594,7 +601,7 @@ namespace entry
 				case WM_USER_WINDOW_SET_TITLE:
 					{
 						Msg* msg = (Msg*)_lparam;
-						SetWindowTextW(m_hwnd[_wparam], UTF8ToUTF16(msg->m_title.c_str()).data() );
+						SetWindowTextW(m_hwnd[_wparam], utf8to16w(msg->m_title.c_str()).data() );
 						delete msg;
 					}
 					break;
@@ -747,7 +754,7 @@ namespace entry
 							HWND parent = GetWindow(_hwnd, GW_OWNER);
 							if (NULL != parent)
 							{
-								PostMessage(parent, _id, _wparam, _lparam);
+								PostMessageW(parent, _id, _wparam, _lparam);
 							}
 						}
 					}
@@ -1043,6 +1050,8 @@ namespace entry
 
 		static LRESULT CALLBACK wndProc(HWND _hwnd, UINT _id, WPARAM _wparam, LPARAM _lparam);
 
+		VsyncWaiter m_vsyncWaiter;
+
 		EventQueue m_eventQueue;
 		WCHAR m_surrogate;
 		bx::Mutex m_lock;
@@ -1108,7 +1117,7 @@ namespace entry
 			msg->m_height = _height;
 			msg->m_title  = _title;
 			msg->m_flags  = _flags;
-			PostMessage(s_ctx.m_hwnd[0], WM_USER_WINDOW_CREATE, handle.idx, (LPARAM)msg);
+			PostMessageW(s_ctx.m_hwnd[0], WM_USER_WINDOW_CREATE, handle.idx, (LPARAM)msg);
 		}
 
 		return handle;
@@ -1118,7 +1127,7 @@ namespace entry
 	{
 		if (UINT16_MAX != _handle.idx)
 		{
-			PostMessage(s_ctx.m_hwnd[0], WM_USER_WINDOW_DESTROY, _handle.idx, 0);
+			PostMessageW(s_ctx.m_hwnd[0], WM_USER_WINDOW_DESTROY, _handle.idx, 0);
 
 			bx::MutexScope scope(s_ctx.m_lock);
 			s_ctx.m_windowAlloc.free(_handle.idx);
@@ -1130,19 +1139,19 @@ namespace entry
 		Msg* msg = new Msg;
 		msg->m_x = _x;
 		msg->m_y = _y;
-		PostMessage(s_ctx.m_hwnd[0], WM_USER_WINDOW_SET_POS, _handle.idx, (LPARAM)msg);
+		PostMessageW(s_ctx.m_hwnd[0], WM_USER_WINDOW_SET_POS, _handle.idx, (LPARAM)msg);
 	}
 
 	void setWindowSize(WindowHandle _handle, uint32_t _width, uint32_t _height)
 	{
-		PostMessage(s_ctx.m_hwnd[0], WM_USER_WINDOW_SET_SIZE, _handle.idx, (_height<<16) | (_width&0xffff) );
+		PostMessageW(s_ctx.m_hwnd[0], WM_USER_WINDOW_SET_SIZE, _handle.idx, (_height<<16) | (_width&0xffff) );
 	}
 
 	void setWindowTitle(WindowHandle _handle, const char* _title)
 	{
 		Msg* msg = new Msg;
 		msg->m_title = _title;
-		PostMessage(s_ctx.m_hwnd[0], WM_USER_WINDOW_SET_TITLE, _handle.idx, (LPARAM)msg);
+		PostMessageW(s_ctx.m_hwnd[0], WM_USER_WINDOW_SET_TITLE, _handle.idx, (LPARAM)msg);
 	}
 
 	void setWindowFlags(WindowHandle _handle, uint32_t _flags, bool _enabled)
@@ -1150,17 +1159,17 @@ namespace entry
 		Msg* msg = new Msg;
 		msg->m_flags = _flags;
 		msg->m_flagsEnabled = _enabled;
-		PostMessage(s_ctx.m_hwnd[0], WM_USER_WINDOW_SET_FLAGS, _handle.idx, (LPARAM)msg);
+		PostMessageW(s_ctx.m_hwnd[0], WM_USER_WINDOW_SET_FLAGS, _handle.idx, (LPARAM)msg);
 	}
 
 	void toggleFullscreen(WindowHandle _handle)
 	{
-		PostMessage(s_ctx.m_hwnd[0], WM_USER_WINDOW_TOGGLE_FRAME, _handle.idx, 0);
+		PostMessageW(s_ctx.m_hwnd[0], WM_USER_WINDOW_TOGGLE_FRAME, _handle.idx, 0);
 	}
 
 	void setMouseLock(WindowHandle _handle, bool _lock)
 	{
-		PostMessage(s_ctx.m_hwnd[0], WM_USER_WINDOW_MOUSE_LOCK, _handle.idx, _lock);
+		PostMessageW(s_ctx.m_hwnd[0], WM_USER_WINDOW_MOUSE_LOCK, _handle.idx, _lock);
 	}
 
 	void* getNativeWindowHandle(WindowHandle _handle)
@@ -1182,16 +1191,33 @@ namespace entry
 	{
 		MainThreadEntry* self = (MainThreadEntry*)_userData;
 		int32_t result = main(self->m_argc, self->m_argv);
-		PostMessage(s_ctx.m_hwnd[0], WM_QUIT, 0, 0);
+		PostMessageW(s_ctx.m_hwnd[0], WM_QUIT, 0, 0);
 		return result;
 	}
 
 } // namespace entry
 
-int main(int _argc, const char* const* _argv)
+static int main_utf8(int _argc, const char* const* _argv)
 {
 	using namespace entry;
 	return s_ctx.run(_argc, _argv);
+}
+
+int wmain(int _argc, const wchar_t *const*_argv)
+{
+	std::vector<std::string> u8Args;
+	std::vector<const char*> u8ArgsPtr;
+	u8Args.reserve(_argc);
+	u8ArgsPtr.reserve(_argc);
+
+	for (int i = 0; i < _argc; ++i)
+	{
+		u8Args.emplace_back(utf16to8(_argv[i]));
+		u8ArgsPtr.emplace_back(u8Args.back().c_str());
+	}
+
+	using namespace entry;
+	return main_utf8(_argc, u8ArgsPtr.data());
 }
 
 #endif // BX_PLATFORM_WINDOWS

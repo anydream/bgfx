@@ -1,7 +1,8 @@
 *.bin binary diff=hex
-*.c   eol=lf
-*.cpp eol=lf
-*.h   eol=lf
+*.c   eol=crlf
+*.cpp eol=crlf
+*.h   eol=crlf
+*.hpp eol=crlf
 *.lua eol=lf
 *.m   eol=lf
 *.md  eol=lf

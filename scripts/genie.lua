@@ -221,6 +221,7 @@ function exampleProjectDefaults()
 	}
 
 	flags {
+		"Unicode",
 		"FatalWarnings",
 	}
 

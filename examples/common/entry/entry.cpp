@@ -652,39 +652,39 @@ restart:
 
 		int32_t result = bx::kExitSuccess;
 		s_restartApp[0] = '\0';
-		if (0 == s_numApps)
-		{
-			result = ::_main_(_argc, (char**)_argv);
-		}
-		else if (0 != bx::strLen(s_restartArgs) )
+
 		{
 			char extraArgsBuf[256];
 			bx::strCopy(extraArgsBuf, BX_COUNTOF(extraArgsBuf), s_restartArgs);
 
-			const char* restartArgv[64];
+			const char *restartArgv[64];
 			int restartArgc = 0;
 
-			if (0 < _argc)
+			// Collect startup parameters
+			for (int ii = 0; ii < _argc && restartArgc < (int)BX_COUNTOF(restartArgv) - 1; ++ii)
 			{
-				restartArgv[restartArgc++] = _argv[0];
+				restartArgv[restartArgc++] = _argv[ii];
 			}
 
-			char* extraArgv[32];
+			char *extraArgv[32];
 			int extraArgc;
 			char tokenBuf[256];
 			uint32_t tokenBufSize = sizeof(tokenBuf);
-			bx::tokenizeCommandLine(extraArgsBuf, tokenBuf, tokenBufSize, extraArgc, extraArgv, BX_COUNTOF(extraArgv) );
+			bx::tokenizeCommandLine(extraArgsBuf, tokenBuf, tokenBufSize, extraArgc, extraArgv, BX_COUNTOF(extraArgv));
+
+			// Override startup parameters
+			if (extraArgc != 0)
+				restartArgc = 1;
 
 			for (int ii = 0; ii < extraArgc && restartArgc < (int)BX_COUNTOF(restartArgv) - 1; ++ii)
 			{
 				restartArgv[restartArgc++] = extraArgv[ii];
 			}
 
-			result = runApp(getCurrentApp(selected), restartArgc, restartArgv);
-		}
-		else
-		{
-			result = runApp(getCurrentApp(selected), _argc, _argv);
+			if (0 == s_numApps)
+				result = ::_main_(restartArgc, (char**)restartArgv);
+			else
+				result = runApp(getCurrentApp(selected), restartArgc, restartArgv);
 		}
 
 		if (0 != bx::strLen(s_restartApp) )
